@@ -78,7 +78,6 @@ public class FilePickerModule extends ReactContextBaseJavaModule implements Acti
     public String getName() {
         return "FilePickerManager";
     }
-
     @ReactMethod
     public void showFilePicker(final ReadableMap options, final Callback callback) {
         Activity currentActivity = getCurrentActivity();
@@ -97,16 +96,21 @@ public class FilePickerModule extends ReactContextBaseJavaModule implements Acti
             return;
         }
 
-        launchFileChooser(callback);
+        launchFileChooser(options, callback);
     }
 
     // NOTE: Currently not reentrant / doesn't support concurrent requests
     @ReactMethod
-    public void launchFileChooser(final Callback callback) {
+    public void launchFileChooser(final ReadableMap options, final Callback callback) {
         int requestCode;
         Intent libraryIntent;
         response = Arguments.createMap();
         Activity currentActivity = getCurrentActivity();
+        String type = "*/*";
+        if(options.hasKey("type")) {
+            String userRequestedType = options.getString("type");
+            type = userRequestedType+"/*";
+        }
 
         if (currentActivity == null) {
             response.putString("error", "can't find current Activity");
@@ -116,7 +120,8 @@ public class FilePickerModule extends ReactContextBaseJavaModule implements Acti
 
         requestCode = REQUEST_LAUNCH_FILE_CHOOSER;
         libraryIntent = new Intent(Intent.ACTION_GET_CONTENT);
-        libraryIntent.setType("*/*");
+//        libraryIntent.setType("audio/*");
+        libraryIntent.setType(type);
         libraryIntent.addCategory(Intent.CATEGORY_OPENABLE);
 
         if (libraryIntent.resolveActivity(mReactContext.getPackageManager()) == null) {
