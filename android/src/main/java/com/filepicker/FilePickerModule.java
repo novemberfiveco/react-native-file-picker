@@ -29,6 +29,8 @@ import com.facebook.react.bridge.ReactMethod;
 import com.facebook.react.bridge.ReadableMap;
 import com.facebook.react.bridge.ReadableMapKeySetIterator;
 import com.facebook.react.bridge.WritableMap;
+import com.facebook.react.modules.core.PermissionAwareActivity;
+import com.facebook.react.modules.core.PermissionListener;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -56,39 +58,15 @@ public class FilePickerModule extends ReactContextBaseJavaModule implements Acti
         mReactContext = reactContext;
     }
 
-    private boolean permissionsCheck(Activity activity) {
-        int readPermission = ActivityCompat.checkSelfPermission(activity, Manifest.permission.READ_EXTERNAL_STORAGE);
-        int writePermission = ActivityCompat.checkSelfPermission(activity, Manifest.permission.WRITE_EXTERNAL_STORAGE);
-        int cameraPermission = ActivityCompat.checkSelfPermission(activity, Manifest.permission.CAMERA);
-        if (writePermission != PackageManager.PERMISSION_GRANTED
-                || cameraPermission != PackageManager.PERMISSION_GRANTED
-                || readPermission != PackageManager.PERMISSION_GRANTED) {
-            String[] PERMISSIONS = {
-                    Manifest.permission.READ_EXTERNAL_STORAGE,
-                    Manifest.permission.WRITE_EXTERNAL_STORAGE,
-                    Manifest.permission.CAMERA
-            };
-            ActivityCompat.requestPermissions(activity, PERMISSIONS, 1);
-            return false;
-        }
-        return true;
-    }
-
     @Override
     public String getName() {
         return "FilePickerManager";
     }
+
     @ReactMethod
     public void showFilePicker(final ReadableMap options, final Callback callback) {
-        Activity currentActivity = getCurrentActivity();
+        final Activity currentActivity = getCurrentActivity();
         response = Arguments.createMap();
-
-        if (!permissionsCheck(currentActivity)) {
-            response.putBoolean("didRequestPermission", true);
-            response.putString("option", "launchFileChooser");
-            callback.invoke(response);
-            return;
-        }
 
         if (currentActivity == null) {
             response.putString("error", "can't find current Activity");
@@ -96,7 +74,37 @@ public class FilePickerModule extends ReactContextBaseJavaModule implements Acti
             return;
         }
 
-        launchFileChooser(options, callback);
+        int readPermission = ActivityCompat.checkSelfPermission(currentActivity, Manifest.permission.READ_EXTERNAL_STORAGE);
+        int writePermission = ActivityCompat.checkSelfPermission(currentActivity, Manifest.permission.WRITE_EXTERNAL_STORAGE);
+        if (writePermission != PackageManager.PERMISSION_GRANTED
+                || readPermission != PackageManager.PERMISSION_GRANTED) {
+            String[] PERMISSIONS = {
+                    Manifest.permission.READ_EXTERNAL_STORAGE,
+                    Manifest.permission.WRITE_EXTERNAL_STORAGE,
+            };
+            ((PermissionAwareActivity) currentActivity).requestPermissions(PERMISSIONS, 1, new PermissionListener() {
+                @Override
+                public boolean onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+                    if (requestCode == 1) {
+                        int readPermission = ActivityCompat.checkSelfPermission(currentActivity, Manifest.permission.READ_EXTERNAL_STORAGE);
+                        int writePermission = ActivityCompat.checkSelfPermission(currentActivity, Manifest.permission.WRITE_EXTERNAL_STORAGE);
+                        if (writePermission != PackageManager.PERMISSION_GRANTED
+                                || readPermission != PackageManager.PERMISSION_GRANTED) {
+                            // user rejected permission request
+                            response.putString("error", "User rejected permission request");
+                            callback.invoke(response);
+                            return true;
+                        }
+                        // permissions available
+                        launchFileChooser(options, callback);
+                        return true;
+                    }
+                    return true;
+                }
+            });
+        } else {
+            launchFileChooser(options, callback);
+        }
     }
 
     // NOTE: Currently not reentrant / doesn't support concurrent requests
@@ -107,9 +115,9 @@ public class FilePickerModule extends ReactContextBaseJavaModule implements Acti
         response = Arguments.createMap();
         Activity currentActivity = getCurrentActivity();
         String type = "*/*";
-        if(options.hasKey("type")) {
+        if (options.hasKey("type")) {
             String userRequestedType = options.getString("type");
-            type = userRequestedType+"/*";
+            type = userRequestedType + "/*";
         }
 
         if (currentActivity == null) {
@@ -140,45 +148,45 @@ public class FilePickerModule extends ReactContextBaseJavaModule implements Acti
     }
 
     // R.N > 33
-    public void onActivityResult(final Activity activity, final int requestCode, final int resultCode, final Intent data) {
-      onActivityResult(requestCode, resultCode, data);
+    public void onActivityResult(final Activity activity, final int requestCode,
+                                 final int resultCode, final Intent data) {
+        onActivityResult(requestCode, resultCode, data);
     }
 
-    public void onActivityResult(final int requestCode, final int resultCode, final Intent data) {
+    public void onActivityResult(final int requestCode, final int resultCode,
+                                 final Intent data) {
 
-      //robustness code
-      if (mCallback == null || requestCode != REQUEST_LAUNCH_FILE_CHOOSER) {
-        return;
-      }
-      // user cancel
-      if (resultCode != Activity.RESULT_OK) {
-          response.putBoolean("didCancel", true);
-          mCallback.invoke(response);
-          return;
-      }
+        //robustness code
+        if (mCallback == null || requestCode != REQUEST_LAUNCH_FILE_CHOOSER) {
+            return;
+        }
+        // user cancel
+        if (resultCode != Activity.RESULT_OK) {
+            response.putBoolean("didCancel", true);
+            mCallback.invoke(response);
+            return;
+        }
 
-      Activity currentActivity = getCurrentActivity();
+        Activity currentActivity = getCurrentActivity();
 
-      Uri uri = data.getData();
-      response.putString("uri", data.getData().toString());
-      String path = null;
-      path = getPath(currentActivity, uri);
-      if (path != null) {
-          response.putString("path", path);
-      }else{
-          path = getFileFromUri(currentActivity, uri);
-          if(!path.equals("error")){
-              response.putString("path", path);
-          }
-      }
+        Uri uri = data.getData();
+        response.putString("uri", data.getData().toString());
+        String path = null;
+        path = getPath(currentActivity, uri);
+        if (path != null) {
+            response.putString("path", path);
+        } else {
+            path = getFileFromUri(currentActivity, uri);
+            if (!path.equals("error")) {
+                response.putString("path", path);
+            }
+        }
 
-      response.putString("type", currentActivity.getContentResolver().getType(uri));
-      response.putString("fileName", getFileNameFromUri(currentActivity, uri));
+        response.putString("type", currentActivity.getContentResolver().getType(uri));
+        response.putString("fileName", getFileNameFromUri(currentActivity, uri));
 
-      mCallback.invoke(response);
+        mCallback.invoke(response);
     }
-
-
 
 
     @TargetApi(Build.VERSION_CODES.KITKAT)
@@ -305,8 +313,8 @@ public class FilePickerModule extends ReactContextBaseJavaModule implements Acti
                 final int column_index = cursor.getColumnIndexOrThrow(column);
                 return cursor.getString(column_index);
             }
-	} catch(Exception e) {
-	    Log.e("FilePickerModule", "Failed to get cursor, so return null for path", e);
+        } catch (Exception e) {
+            Log.e("FilePickerModule", "Failed to get cursor, so return null for path", e);
         } finally {
             if (cursor != null)
                 cursor.close();
@@ -314,58 +322,59 @@ public class FilePickerModule extends ReactContextBaseJavaModule implements Acti
         return null;
     }
 
-    private String getFileFromUri(Activity activity, Uri uri){
-      //If it can't get path of file, file is saved in cache, and obtain path from there
-      try {
-        String filePath = activity.getCacheDir().toString();
-        String fileName = getFileNameFromUri(activity, uri);
-        String path = filePath + "/" + fileName;
-        if(!fileName.equals("error") && saveFileOnCache(path, activity, uri)){
-          return path;
-        }else{
-          return "error";
+    private String getFileFromUri(Activity activity, Uri uri) {
+        //If it can't get path of file, file is saved in cache, and obtain path from there
+        try {
+            String filePath = activity.getCacheDir().toString();
+            String fileName = getFileNameFromUri(activity, uri);
+            String path = filePath + "/" + fileName;
+            if (!fileName.equals("error") && saveFileOnCache(path, activity, uri)) {
+                return path;
+            } else {
+                return "error";
+            }
+        } catch (Exception e) {
+            //Log.d("FilePickerModule", "Error getFileFromStream");
+            return "error";
         }
-      } catch (Exception e) {
-        //Log.d("FilePickerModule", "Error getFileFromStream");
-        return "error";
-      }
     }
 
-    private String getFileNameFromUri(Activity activity, Uri uri){
-      Cursor cursor = activity.getContentResolver().query(uri, null, null, null, null);
-      if (cursor != null && cursor.moveToFirst()) {
-          final int column_index = cursor.getColumnIndexOrThrow("_display_name");
-          return cursor.getString(column_index);
-      }else{
-        return "error";
-      }
+    private String getFileNameFromUri(Activity activity, Uri uri) {
+        Cursor cursor = activity.getContentResolver().query(uri, null, null, null, null);
+        if (cursor != null && cursor.moveToFirst()) {
+            final int column_index = cursor.getColumnIndexOrThrow("_display_name");
+            return cursor.getString(column_index);
+        } else {
+            return "error";
+        }
     }
 
-    private boolean saveFileOnCache(String path, Activity activity, Uri uri){
-      //Log.d("FilePickerModule", "saveFileOnCache path: "+path);
-      try {
-        InputStream is = activity.getContentResolver().openInputStream(uri);
-        OutputStream stream = new BufferedOutputStream(new FileOutputStream(path));
-        int bufferSize = 1024;
-        byte[] buffer = new byte[bufferSize];
-        int len = 0;
-        while ((len = is.read(buffer)) != -1) {
-            stream.write(buffer, 0, len);
+    private boolean saveFileOnCache(String path, Activity activity, Uri uri) {
+        //Log.d("FilePickerModule", "saveFileOnCache path: "+path);
+        try {
+            InputStream is = activity.getContentResolver().openInputStream(uri);
+            OutputStream stream = new BufferedOutputStream(new FileOutputStream(path));
+            int bufferSize = 1024;
+            byte[] buffer = new byte[bufferSize];
+            int len = 0;
+            while ((len = is.read(buffer)) != -1) {
+                stream.write(buffer, 0, len);
+            }
+
+            if (stream != null)
+                stream.close();
+
+            //Log.d("FilePickerModule", "saveFileOnCache done!");
+            return true;
+
+        } catch (Exception e) {
+            //Log.d("FilePickerModule", "saveFileOnCache error");
+            return false;
         }
-
-        if(stream!=null)
-            stream.close();
-
-        //Log.d("FilePickerModule", "saveFileOnCache done!");
-        return true;
-
-      } catch (Exception e) {
-        //Log.d("FilePickerModule", "saveFileOnCache error");
-        return false;
-      }
     }
 
     // Required for RN 0.30+ modules than implement ActivityEventListener
-    public void onNewIntent(Intent intent) { }
+    public void onNewIntent(Intent intent) {
+    }
 
 }
