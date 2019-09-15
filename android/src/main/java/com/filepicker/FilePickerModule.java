@@ -32,6 +32,8 @@ import com.facebook.react.bridge.WritableMap;
 import com.facebook.react.modules.core.PermissionAwareActivity;
 import com.facebook.react.modules.core.PermissionListener;
 
+import org.apache.commons.io.FileUtils;
+
 import java.util.ArrayList;
 import java.util.List;
 
@@ -172,19 +174,27 @@ public class FilePickerModule extends ReactContextBaseJavaModule implements Acti
         Uri uri = data.getData();
         response.putString("uri", data.getData().toString());
         String path = null;
+        String readableSize = null;
+        Long size = null;
         path = getPath(currentActivity, uri);
         if (path != null) {
             response.putString("path", path);
+            readableSize = getFileReadableSize(path);
+            size = getFileSize(path);
+            response.putString("readableSize", readableSize);
+            response.putInt("size", size.intValue());
         } else {
             path = getFileFromUri(currentActivity, uri);
             if (!path.equals("error")) {
+                readableSize = getFileReadableSize(path);
+                size = getFileSize(path);
                 response.putString("path", path);
+                response.putString("readableSize", readableSize);
+                response.putInt("size", size.intValue());
             }
         }
-
         response.putString("type", currentActivity.getContentResolver().getType(uri));
         response.putString("fileName", getFileNameFromUri(currentActivity, uri));
-
         mCallback.invoke(response);
     }
 
@@ -320,6 +330,18 @@ public class FilePickerModule extends ReactContextBaseJavaModule implements Acti
                 cursor.close();
         }
         return null;
+    }
+    // get the readable size of the file
+    // usign the apache commons io FileUtils Class
+    private String getFileReadableSize(String path) {
+        File file = new File(path);
+        long size = FileUtils.sizeOf(file);
+        return FileUtils.byteCountToDisplaySize(size);
+    }
+    // get the real size of the file in long format
+    private Long getFileSize (String path) {
+        File file = new File(path);
+        return file.length();
     }
 
     private String getFileFromUri(Activity activity, Uri uri) {
