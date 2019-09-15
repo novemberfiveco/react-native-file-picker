@@ -45,4 +45,5 @@ repositories {
 
 dependencies {
     implementation 'com.facebook.react:react-native:+'
+    implementation group: 'commons-io', name: 'commons-io', version: '2.5'
 }
