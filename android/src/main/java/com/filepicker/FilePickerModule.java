@@ -5,6 +5,7 @@ import android.annotation.TargetApi;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
+import android.content.ClipData;
 import android.content.ContentUris;
 import android.content.Context;
 import android.content.DialogInterface;
@@ -17,6 +18,7 @@ import android.os.Environment;
 import android.provider.DocumentsContract;
 import android.provider.MediaStore;
 import androidx.core.app.ActivityCompat;
+
 import android.util.Log;
 import android.widget.ArrayAdapter;
 
@@ -28,6 +30,7 @@ import com.facebook.react.bridge.ReactContextBaseJavaModule;
 import com.facebook.react.bridge.ReactMethod;
 import com.facebook.react.bridge.ReadableMap;
 import com.facebook.react.bridge.ReadableMapKeySetIterator;
+import com.facebook.react.bridge.WritableArray;
 import com.facebook.react.bridge.WritableMap;
 import com.facebook.react.modules.core.PermissionAwareActivity;
 import com.facebook.react.modules.core.PermissionListener;
@@ -45,7 +48,7 @@ import java.io.OutputStream;
 
 public class FilePickerModule extends ReactContextBaseJavaModule implements ActivityEventListener {
 
-    static final int REQUEST_LAUNCH_FILE_CHOOSER = 2;
+    static int REQUEST_LAUNCH_FILE_CHOOSER = 2;
 
     private final ReactApplicationContext mReactContext;
 
@@ -117,6 +120,10 @@ public class FilePickerModule extends ReactContextBaseJavaModule implements Acti
         response = Arguments.createMap();
         Activity currentActivity = getCurrentActivity();
         String type = "*/*";
+        boolean multiple = false;
+        if (options.hasKey("multiple")) {
+            multiple = options.getBoolean("multiple");
+        }
         if (options.hasKey("type")) {
             String userRequestedType = options.getString("type");
             type = userRequestedType + "/*";
@@ -128,9 +135,17 @@ public class FilePickerModule extends ReactContextBaseJavaModule implements Acti
             return;
         }
 
-        requestCode = REQUEST_LAUNCH_FILE_CHOOSER;
+        if (multiple) {
+            REQUEST_LAUNCH_FILE_CHOOSER = 41;
+            requestCode = REQUEST_LAUNCH_FILE_CHOOSER;
+        } else {
+            requestCode = REQUEST_LAUNCH_FILE_CHOOSER;
+        }
         libraryIntent = new Intent(Intent.ACTION_GET_CONTENT);
 //        libraryIntent.setType("audio/*");
+        if (multiple) {
+            libraryIntent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, multiple);
+        }
         libraryIntent.setType(type);
         libraryIntent.addCategory(Intent.CATEGORY_OPENABLE);
 
@@ -143,7 +158,13 @@ public class FilePickerModule extends ReactContextBaseJavaModule implements Acti
         mCallback = callback;
 
         try {
-            currentActivity.startActivityForResult(Intent.createChooser(libraryIntent, "Select file to Upload"), requestCode);
+            Intent intent = null;
+            if (multiple) {
+                 intent =  Intent.createChooser(libraryIntent, "Select a file");
+            } else {
+                intent =  Intent.createChooser(libraryIntent, "Select multiple files");
+            }
+            currentActivity.startActivityForResult(intent, requestCode);
         } catch (ActivityNotFoundException e) {
             e.printStackTrace();
         }
@@ -157,7 +178,6 @@ public class FilePickerModule extends ReactContextBaseJavaModule implements Acti
 
     public void onActivityResult(final int requestCode, final int resultCode,
                                  final Intent data) {
-
         //robustness code
         if (mCallback == null || requestCode != REQUEST_LAUNCH_FILE_CHOOSER) {
             return;
@@ -169,33 +189,64 @@ public class FilePickerModule extends ReactContextBaseJavaModule implements Acti
             return;
         }
 
-        Activity currentActivity = getCurrentActivity();
+        Uri uri = null;
+        ClipData clipData = null;
+        if (data != null) {
+            uri = data.getData();
+            clipData = data.getClipData();
+        }
+        try {
+            WritableArray results = Arguments.createArray();
+            if (uri != null) {
+                WritableMap doc = getDataFromURI(uri);
+                mCallback.invoke(doc);
+            } else if (clipData != null && clipData.getItemCount() > 0) {
+                final int length = clipData.getItemCount();
+                for (int i = 0; i < length; ++i) {
+                    ClipData.Item item = clipData.getItemAt(i);
+                    WritableMap doc = getDataFromURI(item.getUri());
+                    results.pushMap(doc);
+                }
+                mCallback.invoke(results);
+            } else {
+                response.putString("error", "Invalid data returned by intent");
+                mCallback.invoke(response);
+                return;
+            }
+        } catch (Exception e) {
+            response.putString("error", e.toString());
+            mCallback.invoke(response);
+            return;
+        }
+    }
 
-        Uri uri = data.getData();
-        response.putString("uri", data.getData().toString());
+    private WritableMap getDataFromURI(Uri uri) {
+        WritableMap map = Arguments.createMap();
+        Activity currentActivity = getCurrentActivity();
+        map.putString("uri", uri.toString());
         String path = null;
         String readableSize = null;
         Long size = null;
         path = getPath(currentActivity, uri);
         if (path != null) {
-            response.putString("path", path);
+            map.putString("path", path);
             readableSize = getFileReadableSize(path);
             size = getFileSize(path);
-            response.putString("readableSize", readableSize);
-            response.putInt("size", size.intValue());
+            map.putString("readableSize", readableSize);
+            map.putInt("size", size.intValue());
         } else {
             path = getFileFromUri(currentActivity, uri);
             if (!path.equals("error")) {
                 readableSize = getFileReadableSize(path);
                 size = getFileSize(path);
-                response.putString("path", path);
-                response.putString("readableSize", readableSize);
-                response.putInt("size", size.intValue());
+                map.putString("path", path);
+                map.putString("readableSize", readableSize);
+                map.putInt("size", size.intValue());
             }
         }
-        response.putString("type", currentActivity.getContentResolver().getType(uri));
-        response.putString("fileName", getFileNameFromUri(currentActivity, uri));
-        mCallback.invoke(response);
+        map.putString("type", currentActivity.getContentResolver().getType(uri));
+        map.putString("fileName", getFileNameFromUri(currentActivity, uri));
+        return map;
     }
 
 
@@ -331,14 +382,13 @@ public class FilePickerModule extends ReactContextBaseJavaModule implements Acti
         }
         return null;
     }
-    // get the readable size of the file
-    // usign the apache commons io FileUtils Class
+
     private String getFileReadableSize(String path) {
         File file = new File(path);
         long size = FileUtils.sizeOf(file);
         return FileUtils.byteCountToDisplaySize(size);
     }
-    // get the real size of the file in long format
+
     private Long getFileSize (String path) {
         File file = new File(path);
         return file.length();
