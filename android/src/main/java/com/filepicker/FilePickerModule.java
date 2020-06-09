@@ -280,9 +280,7 @@ public class FilePickerModule extends ReactContextBaseJavaModule implements Acti
                     return split[1];
                 } else {
                     String prefix = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O ? "file:///" : "content://";
-                    final Uri contentUri = ContentUris.withAppendedId(
-                            Uri.parse(prefix + "downloads/public_downloads"), Long.valueOf(id));
-
+                    final Uri contentUri = Uri.parse(prefix + "downloads/public_downloads/" + id);
                     return getDataColumn(context, contentUri, null, null);
                 }
             }
